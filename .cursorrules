@@ -1,0 +1,186 @@
+Key Principles
+
+- Write concise, technical responses with accurate Python + GraphQL examples.
+- Prefer functional, declarative programming; avoid classes unless required by Strawberry.
+- Keep resolvers **thin**: validate input → call service → return result.
+- Use **RORO (Receive an Object, Return an Object)** everywhere for consistency.
+- Use **async resolvers** for all I/O-bound tasks.
+- Use lowercase with underscores for directories and files.
+
+---
+
+Schema Organization
+
+```
+graphql/
+  ├── schema.py          # Combine queries & mutations into one schema
+  ├── queries/           # Query resolvers
+  ├── mutations/         # Mutation resolvers
+  ├── types/             # GraphQL types
+  ├── inputs/            # GraphQL input types
+  ├── services/          # Business logic
+  ├── utils/             # Auth, error handling, dataloaders
+```
+
+---
+
+Error Handling & Validation
+
+* Validate at resolver **entry point**.
+* Use **guard clauses** to reject invalid states early.
+* Use `@strawberry.type` for consistent error objects.
+* Log unexpected exceptions in middleware, not resolvers.
+* Always return safe, user-friendly error messages.
+
+✅ Example – Custom Error Types
+
+```python
+# types/error_type.py
+import strawberry
+
+@strawberry.type
+class Error:
+    field: str
+    message: str
+```
+
+---
+
+Query Example (Happy Path + Validation)
+
+```python
+# queries/user_queries.py
+import strawberry
+from typing import List
+from ..types.user_type import User
+from ..inputs.user_inputs import UserFilter
+from ..services.user_service import fetch_users
+from ..types.error_type import Error
+
+@strawberry.type
+class UserQueries:
+    @strawberry.field
+    async def users(self, filters: UserFilter | None = None) -> List[User] | Error:
+        if filters and filters.is_active not in (True, False, None):
+            return Error(field="is_active", message="Invalid filter value")
+        return await fetch_users(filters)
+```
+
+---
+
+Mutation Example (RORO + Guard Clauses)
+
+```python
+# mutations/user_mutations.py
+import strawberry
+from ..types.user_type import User
+from ..inputs.user_inputs import UserCreateInput
+from ..services.user_service import create_user
+from ..types.error_type import Error
+
+@strawberry.type
+class UserMutations:
+    @strawberry.mutation
+    async def create_user(self, input: UserCreateInput) -> User | Error:
+        if not input.email or "@" not in input.email:
+            return Error(field="email", message="Invalid email format")
+
+        user = await create_user(input)
+        if not user:
+            return Error(field="general", message="User could not be created")
+        
+        return user
+```
+
+---
+
+Service Layer (Business Logic)
+
+```python
+# services/user_service.py
+from ..types.user_type import User
+from ..inputs.user_inputs import UserCreateInput, UserFilter
+from .db import db_insert_user, db_fetch_users
+
+async def create_user(input: UserCreateInput) -> User | None:
+    new_user = await db_insert_user(input.dict())
+    if not new_user:
+        return None
+    return User(**new_user)
+
+async def fetch_users(filters: UserFilter | None) -> list[User]:
+    users = await db_fetch_users(filters.dict() if filters else {})
+    return [User(**u) for u in users]
+```
+
+---
+
+Input Types
+
+```python
+# inputs/user_inputs.py
+import strawberry
+
+@strawberry.input
+class UserCreateInput:
+    name: str
+    email: str
+    is_active: bool = True
+
+@strawberry.input
+class UserFilter:
+    is_active: bool | None = None
+```
+
+---
+
+Assembling Schema
+
+```python
+# schema.py
+import strawberry
+from .queries.user_queries import UserQueries
+from .mutations.user_mutations import UserMutations
+
+@strawberry.type
+class Query(UserQueries): ...
+@strawberry.type
+class Mutation(UserMutations): ...
+
+schema = strawberry.Schema(query=Query, mutation=Mutation)
+```
+
+---
+
+Integration with FastAPI
+
+```python
+# main.py
+from fastapi import FastAPI
+from strawberry.fastapi import GraphQLRouter
+from graphql.schema import schema
+
+app = FastAPI()
+graphql_app = GraphQLRouter(schema)
+app.include_router(graphql_app, prefix="/graphql")
+```
+
+---
+
+Performance Best Practices
+
+* Use **async dataloaders** to prevent N+1 queries.
+* Cache frequently used queries with Redis or in-memory storage.
+* Only fetch requested fields in resolvers.
+* Validate + sanitize inputs at resolver boundaries.
+
+---
+
+👉 With this, you now have:
+
+1. Queries (with validation)
+2. Mutations (with guard clauses + RORO)
+3. Consistent error handling pattern
+4. Modular schema organization
+
+---
