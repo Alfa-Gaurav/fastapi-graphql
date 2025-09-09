@@ -1,0 +1,11 @@
+[project]
+name = "fastapi-graphql"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.111.0",
+    "strawberry-graphql[fastapi]>=0.211.0",
+    "uvicorn[standard]>=0.30.1",
+]
